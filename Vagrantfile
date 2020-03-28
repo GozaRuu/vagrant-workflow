@@ -5,6 +5,16 @@ Vagrant.configure("2") do |config|
   config.vm.box = "StefanScherer/windows_10"
   config.vm.box_version = "2020.02.26"
   config.vm.guest = :windows
+  config.vm.network "private_network", type: "dhcp"
+
+  config.vm.define :base_box do |node|
+    node.vm.provider "virtualbox" do |vb|
+      vb.name = 'Base Box'
+      vb.gui = true
+      vb.cpus = 4
+      vb.memory = 4096
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    end
 
     node.vm.provision "shell", privileged: "true", powershell_elevated_interactive: "true", inline: <<-SHELL
       iwr -useb https://chocolatey.org/install.ps1 | iex
