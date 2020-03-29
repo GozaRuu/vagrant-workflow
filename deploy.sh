@@ -14,7 +14,7 @@ trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
 
 _ME=$(basename "${0}")
 _USERNAME="GozaRuu"
-_BOX_NAME="pls"
+_BOX_NAME="next_level_box"
 _PROVIDER_NAME="virtualbox"
 _VERSION="0.0.0"
 _CURRENT_VERSION=""
@@ -83,12 +83,14 @@ _read_args_and_bump_verion() {
 
 _check_for_box_existance() {
   local _CONTENT
-  _CONTENT=$(vagrant box list | grep "$_BOX_NAME")
-  if [ -z "$_CONTENT" ]; then _IS_NEW_BOX="false"; else _IS_NEW_BOX="true"; fi
+  _CONTENT=$(vagrant box list | grep "$_BOX_NAME" || :)
+  if [ -z "$_CONTENT" ]; then _IS_NEW_BOX="true"; else _IS_NEW_BOX="false"; fi
 }
 
 _get_current_version() {
-  _CURRENT_VERSION=$(vagrant box list | grep "$_BOX_NAME" | sed -E 's/.*\(virtualbox, (.*)\)/\1/')
+  _CURRENT_VERSION=$(vagrant box list | grep "$_BOX_NAME" || : | sed -E 's/.*\(virtualbox, (.*)\)/\1/')
+  echo "$_CURRENT_VERSION"
+  if [ -z "$_CURRENT_VERSION" ]; then _CURRENT_VERSION="0.0.0"; fi
 }
 
 _safely_run() {
@@ -122,9 +124,19 @@ _package_box() {
 
 _get_upload_link() {
   # shellcheck disable=2016
-  _UPLOAD_LINK=$(_safely_run curl "https://vagrantcloud.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload?access_token=$_ACCESS_TOKEN" | _safely_run awk /upload_path/'{print $2}')
+  _UPLOAD_LINK=$(_safely_run curl "https://vagrantcloud.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload?access_token=$_ACCESS_TOKEN" | awk /upload_path/'{print $2}')
 
   if [ "$_DRY_RUN" == "false" ] && [ "$_UPLOAD_LINK" == "" ]; then
+    echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
+    exit 1
+  fi
+}
+
+_upload_box() {
+  _safely_run curl -X PUT --upload-file "$_BOX_NAME".box "$_UPLOAD_LINK"
+  _PREVIOUSLY_RETRIEVED_TOKEN=$(echo "$_UPLOAD_LINK" | sed -E 's/.*\/(.*)"/\1/')
+
+  if [ "$_DRY_RUN" == "false" ] && [ "$_HOSTED_TOCKEN" == "$_PREVIOUSLY_RETRIEVED_TOKEN" ]; then
     echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
     exit 1
   fi
@@ -139,14 +151,15 @@ _main() {
     _print_help
   else
     _check_for_box_existance
+    _get_current_version
     if [ "$_IS_NEW_BOX" == "true" ]; then
       _package_box
     else
       _repackage_box
-      _get_current_version
     fi
     _read_args_and_bump_verion "$@"
     _get_upload_link
+    _upload_box
   fi
 }
 
