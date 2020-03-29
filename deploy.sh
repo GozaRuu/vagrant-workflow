@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Bash Strict Mode
-set -o nounset
-set -o errexit
-set -o pipefail
-set -o errtrace
-IFS=$'\n\t'
-trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
+# set -o nounset
+# set -o errexit
+# set -o pipefail
+# set -o errtrace
+# IFS=$'\n\t'
+# trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
 
 ###############################################################################
 # Environment
@@ -27,10 +27,10 @@ _VERSION="0.0.0"
 _print_help() {
   cat << HEREDOC
     ____   __  ___ _____    ____ _   __ ______ ______ ____   ____   ____
-   / __ \ /  |/  // ___/   /  _// | / //_  __// ____// __ \ / __ \ / __ \
-  / /_/ // /|_/ / \__ \    / / /  |/ /  / /  / __/  / /_/ // / / // /_/ /
+   / __ \\ /  |/  // ___/   /  _// | / //_  __// ____// __ \\ / __ \\ / __ \\
+  / /_/ // /|_/ / \\__ \\    / / /  |/ /  / /  / __/  / /_/ // / / // /_/ /
  / ____// /  / / ___/ /  _/ / / /|  /  / /  / /___ / _, _// /_/ // ____/
-/_/    /_/  /_/ /____/  /___//_/ |_/  /_/  /_____//_/ |_| \____//_/
+/_/    /_/  /_/ /____/  /___//_/ |_/  /_/  /_____//_/ |_| \\____//_/
 
 Repackage and deploy the $_BOX_NAME/$_USERNAME Vagrant box to Vagrant Cloud
 Usage:
@@ -126,15 +126,16 @@ _read_revert_args() {
   fi
 }
 _get_json_field() {
+  echo $1
   python -c 'import sys, json; print json.load(sys.stdin)['"$1"']'
 }
 
 _assert_request_success() {
-  local "$_SUCCESS"
-  local "$_ERROR"
-  _SUCCESS=_get_json_field "success"
+  local _SUCCESS
+  local _ERROR
+  _SUCCESS=$(_get_json_field 'success')
   if [ "$_SUCCESS" == "false" ]; then
-    _ERROR=_get_json_field "error"
+    _ERROR=$(_get_json_field "error")
     echo "FATAL: request failed. Error:$_ERROR"
     exit 1
   fi
@@ -253,37 +254,44 @@ _main() {
   if [[ "${1:-}" =~ ^-h|--help$ ]]; then
     _print_help
   else
-    case $1 in
-      create)
-        shift
-        _package_box
-        _create_box_url
-        _read_create_args "$@"
-        _create_box_version_url "1.0.0"
-        ;;
-      upgrage)
-        shift
-        _repackage_box
-        _get_current_version
-        _read_upgrade_args "$@"
-        _create_box_version_url "$_VERSION"
-        ;;
-      revert)
-        shift
-        _read_revert_args "$@"
-        _revert_box_version "$_VERSION"
-        exit 0
-        ;;
-      *)
-        echo "Unknown command recieved"
-        _print_help
-        exit 1
-        ;;
-    esac
-    _create_provider_for_box_version
-    _fetch_version_upload_url
-    _release_box_version
+
+    _create_box_version_url "1.0.0"
+    # _create_provider_for_box_version
+    # _fetch_version_upload_url
+    # _release_box_version
   fi
+  # else
+  #   case $1 in
+  #     create)
+  #       shift
+  #       _package_box
+  #       _create_box_url
+  #       _read_create_args "$@"
+  #       _create_box_version_url "1.0.0"
+  #       ;;
+  #     upgrage)
+  #       shift
+  #       _repackage_box
+  #       _get_current_version
+  #       _read_upgrade_args "$@"
+  #       _create_box_version_url "$_VERSION"
+  #       ;;
+  #     revert)
+  #       shift
+  #       _read_revert_args "$@"
+  #       _revert_box_version "$_VERSION"
+  #       exit 0
+  #       ;;
+  #     *)
+  #       echo "Unknown command recieved"
+  #       _print_help
+  #       exit 1
+  #       ;;
+  #   esac
+  #   _create_provider_for_box_version
+  #   _fetch_version_upload_url
+  #   _release_box_version
+  # fi
 }
 
 _main "$@"
