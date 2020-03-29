@@ -15,8 +15,12 @@ trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
 _ME=$(basename "${0}")
 _USERNAME="GozaRuu"
 _BOX_NAME="pls"
+_PROVIDER_NAME="virtualbox"
 _VERSION=""
-: "${ACCESS_TOKEN:?Vagrant Access Tonken to upload pms.box was not set}"
+: "${ACCESS_TOKEN:?is not set}"
+: "${DRY_RUN:?is not set}"
+_ACCESS_TOKEN=$ACCESS_TOKEN
+_DRY_RUN=$DRY_RUN
 
 ###############################################################################
 # Help
@@ -40,7 +44,7 @@ HEREDOC
 }
 
 ###############################################################################
-# Program Functions
+# Script Functions
 ###############################################################################
 
 _get_current_version() {
@@ -48,10 +52,8 @@ _get_current_version() {
 }
 
 _read_args_and_bump_verion() {
-  _VERSION=""
   while [[ $# -gt 0 ]]; do
     key="$1"
-
     case $key in
       -ma | --major)
         _VERSION=$(echo "$_CURRENT_VERSION" | awk -F. '{$1++;print}' | sed -E 's/ /./g')
@@ -73,11 +75,26 @@ _read_args_and_bump_verion() {
         ;;
     esac
   done
+
   if [ "$_VERSION" == "" ] || [ "$_CURRENT_VERSION" == "$_VERSION" ]; then
     echo "no version section was specified"
     _print_help
     exit 1
   fi
+}
+
+_safely_run() {
+  _COMMAND=""
+  if [[ "$_DRY_RUN" != "false" ]]; then
+    printf -v _COMMAND "%q " "$@"
+    echo "DRYRUN: Not executing $_COMMAND" >&2
+  else
+    "$@"
+  fi
+}
+
+_get_upload_link() {
+  _UPLOAD_LINK=$(_safely_run curl "https://vagrantcloud.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload?access_token=$_ACCESS_TOKEN" | _safely_run awk /upload_path/'{print $2}')
 }
 
 ###############################################################################
@@ -90,6 +107,7 @@ _main() {
   else
     _get_current_version
     _read_args_and_bump_verion "$@"
+    _get_upload_link
   fi
 }
 
