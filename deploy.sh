@@ -16,7 +16,9 @@ _ME=$(basename "${0}")
 _USERNAME="GozaRuu"
 _BOX_NAME="pls"
 _PROVIDER_NAME="virtualbox"
-_VERSION=""
+_VERSION="0.0.0"
+_CURRENT_VERSION=""
+_IS_NEW_BOX="false"
 : "${ACCESS_TOKEN:?is not set}"
 : "${DRY_RUN:?is not set}"
 _ACCESS_TOKEN=$ACCESS_TOKEN
@@ -46,10 +48,6 @@ HEREDOC
 ###############################################################################
 # Script Functions
 ###############################################################################
-
-_get_current_version() {
-  _CURRENT_VERSION=$(vagrant box list | grep $_BOX_NAME | sed -E 's/.*\(virtualbox, (.*)\)/\1/')
-}
 
 _read_args_and_bump_verion() {
   while [[ $# -gt 0 ]]; do
@@ -83,6 +81,16 @@ _read_args_and_bump_verion() {
   fi
 }
 
+_check_for_box_existance() {
+  local _CONTENT
+  _CONTENT=$(vagrant box list | grep "$_BOX_NAME")
+  if [ -z "$_CONTENT" ]; then _IS_NEW_BOX="false"; else _IS_NEW_BOX="true"; fi
+}
+
+_get_current_version() {
+  _CURRENT_VERSION=$(vagrant box list | grep "$_BOX_NAME" | sed -E 's/.*\(virtualbox, (.*)\)/\1/')
+}
+
 _safely_run() {
   _COMMAND=""
   if [[ "$_DRY_RUN" != "false" ]]; then
@@ -93,8 +101,33 @@ _safely_run() {
   fi
 }
 
+_repackage_box() {
+  _BOX_PATH=$(_safely_run vagrant box repackage "$_BOX_NAME" "$_PROVIDER_NAME" "$_VERSION")
+
+  if [ "$_DRY_RUN" == "false" ] && [ "$_BOX_PATH" == "" ]; then
+    vagrant box list
+    echo "FATAL: Could not repackage box. Make sure $_BOX_NAME is in this list otherwise package new"
+    exit 1
+  fi
+}
+
+_package_box() {
+  _BOX_PATH=$(_safely_run vagrant package --output "$_BOX_NAME.box")
+
+  if [ "$_DRY_RUN" == "false" ] && [ ! -f "./$_BOX_NAME.box" ]; then
+    echo "FATAL: Could not package box. Make sure the VM you want to package is running in $_PROVIDER_NAME"
+    exit 1
+  fi
+}
+
 _get_upload_link() {
+  # shellcheck disable=2016
   _UPLOAD_LINK=$(_safely_run curl "https://vagrantcloud.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload?access_token=$_ACCESS_TOKEN" | _safely_run awk /upload_path/'{print $2}')
+
+  if [ "$_DRY_RUN" == "false" ] && [ "$_UPLOAD_LINK" == "" ]; then
+    echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
+    exit 1
+  fi
 }
 
 ###############################################################################
@@ -105,7 +138,13 @@ _main() {
   if [[ "${1:-}" =~ ^-h|--help$ ]]; then
     _print_help
   else
-    _get_current_version
+    _check_for_box_existance
+    if [ "$_IS_NEW_BOX" == "true" ]; then
+      _package_box
+    else
+      _repackage_box
+      _get_current_version
+    fi
     _read_args_and_bump_verion "$@"
     _get_upload_link
   fi
