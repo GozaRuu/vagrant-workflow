@@ -14,15 +14,11 @@ trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
 
 _ME=$(basename "${0}")
 _USERNAME="GozaRuu"
-_BOX_NAME="next_level_box"
+_BOX_NAME="dry_run"
 _PROVIDER_NAME="virtualbox"
 _VERSION="0.0.0"
-_CURRENT_VERSION=""
-_IS_NEW_BOX="false"
-: "${ACCESS_TOKEN:?is not set}"
+: "${VAGRANT_CLOUD_TOKEN:?is not set}"
 : "${DRY_RUN:?is not set}"
-_ACCESS_TOKEN=$ACCESS_TOKEN
-_DRY_RUN=$DRY_RUN
 
 ###############################################################################
 # Help
@@ -49,7 +45,23 @@ HEREDOC
 # Script Functions
 ###############################################################################
 
-_read_args_and_bump_verion() {
+_read_create_args() {
+  while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+      *)
+        echo "Unknown argument recieved"
+        _print_help
+        exit 1
+        shift
+        ;;
+    esac
+  done
+
+  _VERSION="1.0.0"
+}
+
+_read_upgrade_args() {
   while [[ $# -gt 0 ]]; do
     key="$1"
     case $key in
@@ -81,21 +93,60 @@ _read_args_and_bump_verion() {
   fi
 }
 
-_check_for_box_existance() {
-  local _CONTENT
-  _CONTENT=$(vagrant box list | grep "$_BOX_NAME" || :)
-  if [ -z "$_CONTENT" ]; then _IS_NEW_BOX="true"; else _IS_NEW_BOX="false"; fi
+_read_revert_args() {
+  while [[ $# -gt 0 ]]; do
+    key="$1"
+    case $key in
+      -l | --latest)
+        _VERSION=$_CURRENT_VERSION
+        shift
+        ;;
+      -v | --version)
+        shift
+        if [[ ! "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "FATAL: Given version is not a Semantic Version."
+          exit 1
+        fi
+        _VERSION=$1
+        shift
+        ;;
+      *)
+        echo "Unknown argument recieved"
+        _print_help
+        exit 1
+        shift
+        ;;
+    esac
+  done
+
+  if [ "$_VERSION" == "" ] || [ "$_CURRENT_VERSION" == "$_VERSION" ]; then
+    echo "no version section was specified"
+    _print_help
+    exit 1
+  fi
+}
+_get_json_field() {
+  python -c 'import sys, json; print json.load(sys.stdin)['"$1"']'
+}
+
+_assert_request_success() {
+  local "$_SUCCESS"
+  local "$_ERROR"
+  $_SUCCESS=_get_json_field "success"
+  if [ "$_SUCCESS" == "false" ]; then
+    $_ERROR=_get_json_field "error"
+    echo "FATAL: request failed. Error:$_ERROR"
+    exit 1
+  fi
 }
 
 _get_current_version() {
   _CURRENT_VERSION=$(vagrant box list | grep "$_BOX_NAME" || : | sed -E 's/.*\(virtualbox, (.*)\)/\1/')
-  echo "$_CURRENT_VERSION"
-  if [ -z "$_CURRENT_VERSION" ]; then _CURRENT_VERSION="0.0.0"; fi
 }
 
 _safely_run() {
   _COMMAND=""
-  if [[ "$_DRY_RUN" != "false" ]]; then
+  if [[ "$DRY_RUN" != "false" ]]; then
     printf -v _COMMAND "%q " "$@"
     echo "DRYRUN: Not executing $_COMMAND" >&2
   else
@@ -106,7 +157,7 @@ _safely_run() {
 _repackage_box() {
   _BOX_PATH=$(_safely_run vagrant box repackage "$_BOX_NAME" "$_PROVIDER_NAME" "$_VERSION")
 
-  if [ "$_DRY_RUN" == "false" ] && [ "$_BOX_PATH" == "" ]; then
+  if [ "$DRY_RUN" == "false" ] && [ "$_BOX_PATH" == "" ]; then
     vagrant box list
     echo "FATAL: Could not repackage box. Make sure $_BOX_NAME is in this list otherwise package new"
     exit 1
@@ -114,29 +165,43 @@ _repackage_box() {
 }
 
 _package_box() {
+  echo "packaging currently running VM in $_PROVIDER_NAME as ./$_BOX_NAME.box"
   _BOX_PATH=$(_safely_run vagrant package --output "$_BOX_NAME.box")
 
-  if [ "$_DRY_RUN" == "false" ] && [ ! -f "./$_BOX_NAME.box" ]; then
+  if [ "$DRY_RUN" == "false" ] && [ ! -f "./$_BOX_NAME.box" ]; then
     echo "FATAL: Could not package box. Make sure the VM you want to package is running in $_PROVIDER_NAME"
     exit 1
   fi
 }
 
-_get_upload_link() {
-  # shellcheck disable=2016
-  _UPLOAD_LINK=$(_safely_run curl "https://vagrantcloud.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload?access_token=$_ACCESS_TOKEN" | awk /upload_path/'{print $2}')
-
-  if [ "$_DRY_RUN" == "false" ] && [ "$_UPLOAD_LINK" == "" ]; then
-    echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
-    exit 1
-  fi
+_create_box_url() {
+  echo "creating URL: https://app.vagrantup.com/$_USERNAME/boxes/$_BOX_NAME"
 }
 
-_upload_box() {
-  _safely_run curl -X PUT --upload-file "$_BOX_NAME".box "$_UPLOAD_LINK"
-  _PREVIOUSLY_RETRIEVED_TOKEN=$(echo "$_UPLOAD_LINK" | sed -E 's/.*\/(.*)"/\1/')
+_create_provider_for_box_version() {
+  echo "creating provider $_PROVIDER_NAME for version $_VERSION"
 
-  if [ "$_DRY_RUN" == "false" ] && [ "$_HOSTED_TOCKEN" == "$_PREVIOUSLY_RETRIEVED_TOKEN" ]; then
+}
+
+_get_version_upload_url() {
+  local _RESPONSE
+  _RESPONSE=$(_safely_run curl \
+    --header "Content-Type: application/json" \
+    --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+    https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions \
+    --data '{ "version": { "version": "'"$_VERSION"'" } }')
+
+  _UPLOAD_URL=$(echo "$_RESPONSE" | _assert_request_success | _get_json_field "upload_path")
+}
+
+_release_box_version() {
+  local _HOSTED_TOCKEN
+  _HOSTED_TOCKEN=$(_safely_run curl -X PUT --upload-file "$_BOX_NAME".box "$_UPLOAD_URL")
+  _PREVIOUSLY_RETRIEVED_TOKEN=$(echo "$_UPLOAD_URL" | sed -E 's/.*\/(.*)"/\1/')
+  echo $"$_HOSTED_TOCKEN"
+  echo $"$_PREVIOUSLY_RETRIEVED_TOKEN"
+
+  if [ "$DRY_RUN" == "false" ] && [ "$_HOSTED_TOCKEN" == "$_PREVIOUSLY_RETRIEVED_TOKEN" ]; then
     echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
     exit 1
   fi
@@ -150,16 +215,36 @@ _main() {
   if [[ "${1:-}" =~ ^-h|--help$ ]]; then
     _print_help
   else
-    _check_for_box_existance
-    _get_current_version
-    if [ "$_IS_NEW_BOX" == "true" ]; then
-      _package_box
-    else
-      _repackage_box
-    fi
-    _read_args_and_bump_verion "$@"
-    _get_upload_link
-    _upload_box
+    case $1 in
+      create)
+        shift
+        _package_box
+        _create_box_url
+        _read_create_args "$@"
+        _create_box_version_url "1.0.0"
+        ;;
+      upgrage)
+        shift
+        _repackage_box
+        _get_current_version
+        _read_upgrade_args "$@"
+        _create_box_version_url "$_VERSION"
+        ;;
+      revert)
+        shift
+        _read_revert_args "$@"
+        _revert_box_version "$_VERSION"
+        exit 0
+        ;;
+      *)
+        echo "Unknown command recieved"
+        _print_help
+        exit 1
+        ;;
+    esac
+    _create_provider_for_box_version
+    _get_version_upload_url
+    _release_box_version
   fi
 }
 
