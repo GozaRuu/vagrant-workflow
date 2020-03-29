@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Bash Strict Mode
-# set -o nounset
-# set -o errexit
-# set -o pipefail
-# set -o errtrace
-# IFS=$'\n\t'
-# trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
+set -o nounset
+set -o errexit
+set -o pipefail
+set -o errtrace
+IFS=$'\n\t'
+trap 'echo "Aborting due to errexit on line $LINENO. Exit code: $?" >&2' ERR
 
 ###############################################################################
 # Environment
@@ -125,19 +125,15 @@ _read_revert_args() {
     exit 1
   fi
 }
-_get_json_field() {
-  echo $1
-  python -c 'import sys, json; print json.load(sys.stdin)['"$1"']'
-}
 
 _assert_request_success() {
   local _SUCCESS
   local _ERROR
-  _SUCCESS=$(_get_json_field 'success')
+  _SUCCESS=$(echo "$1" | jq ."success")
   if [ "$_SUCCESS" == "false" ]; then
-    _ERROR=$(_get_json_field "error")
-    echo "FATAL: request failed. Error:$_ERROR"
-    exit 1
+    _ERROR=$(echo "$1" | jq ."errors")
+    echo "FATAL: request failed. Errors:$_ERROR"
+    exit 42
   fi
 }
 
@@ -179,13 +175,15 @@ _create_box_url() {
   local _RESPONSE
 
   echo "fetching $_VERSION upload URL"
-  _RESPONSE=$(_safely_run curl \
-    --header "Content-Type: application/json" \
-    --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-    "https://app.vagrantup.com/api/v1/boxes" \
-    --data '{ "box": { "username": "'"$_USERNAME"'", "name": "'"$_BOX_NAME"'" } }')
+  _RESPONSE=$(
+    _safely_run curl \
+      --header "Content-Type: application/json" \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/boxes" \
+      --data '{ "box": { "username": "'"$_USERNAME"'", "name": "'"$_BOX_NAME"'" } }'
+  )
 
-  echo "$_RESPONSE" | _assert_request_success
+  _assert_request_success "$_RESPONSE"
 }
 
 _create_box_version_url() {
@@ -200,7 +198,7 @@ _create_box_version_url() {
       --data '{ "version": { "version": "'"$1"'" } }'
   )
 
-  echo "$_RESPONSE" | _assert_request_success
+  _assert_request_success "$_RESPONSE"
 }
 
 _create_provider_for_box_version() {
@@ -215,7 +213,7 @@ _create_provider_for_box_version() {
       --data '{ "provider": { "name": "'"$_PROVIDER_NAME"'" } }'
   )
 
-  echo "$_RESPONSE" | _assert_request_success
+  _assert_request_success "$_RESPONSE"
 }
 
 _fetch_version_upload_url() {
@@ -230,7 +228,9 @@ _fetch_version_upload_url() {
       --data '{ "version": { "version": "'"$_VERSION"'" } }'
   )
 
-  _UPLOAD_URL=$(echo "$_RESPONSE" | _assert_request_success | _get_json_field "upload_path")
+  echo "$_RESPONSE" | _assert_request_success
+
+  _UPLOAD_URL=$(echo "$_RESPONSE" | jq ."upload_path")
 }
 
 _release_box_version() {
