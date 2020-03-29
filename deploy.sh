@@ -132,9 +132,9 @@ _get_json_field() {
 _assert_request_success() {
   local "$_SUCCESS"
   local "$_ERROR"
-  $_SUCCESS=_get_json_field "success"
+  _SUCCESS=_get_json_field "success"
   if [ "$_SUCCESS" == "false" ]; then
-    $_ERROR=_get_json_field "error"
+    _ERROR=_get_json_field "error"
     echo "FATAL: request failed. Error:$_ERROR"
     exit 1
   fi
@@ -155,41 +155,79 @@ _safely_run() {
 }
 
 _repackage_box() {
-  _BOX_PATH=$(_safely_run vagrant box repackage "$_BOX_NAME" "$_PROVIDER_NAME" "$_VERSION")
+  _safely_run vagrant box repackage "${_BOX_NAME}_${_VERSION}" "$_PROVIDER_NAME" "$_VERSION"
 
-  if [ "$DRY_RUN" == "false" ] && [ "$_BOX_PATH" == "" ]; then
-    vagrant box list
-    echo "FATAL: Could not repackage box. Make sure $_BOX_NAME is in this list otherwise package new"
+  if [ "$DRY_RUN" == "false" ] && [ ! -f "./${_BOX_NAME}_${_VERSION}.box" ]; then
+    echo "FATAL: Could not repackage box"
     exit 1
   fi
 }
 
 _package_box() {
   echo "packaging currently running VM in $_PROVIDER_NAME as ./$_BOX_NAME.box"
-  _BOX_PATH=$(_safely_run vagrant package --output "$_BOX_NAME.box")
+  _safely_run vagrant package --output "${_BOX_NAME}_${_VERSION}.box"
 
-  if [ "$DRY_RUN" == "false" ] && [ ! -f "./$_BOX_NAME.box" ]; then
+  if [ "$DRY_RUN" == "false" ] && [ ! -f "./${_BOX_NAME}_${_VERSION}.box" ]; then
     echo "FATAL: Could not package box. Make sure the VM you want to package is running in $_PROVIDER_NAME"
     exit 1
   fi
 }
 
 _create_box_url() {
-  echo "creating URL: https://app.vagrantup.com/$_USERNAME/boxes/$_BOX_NAME"
-}
-
-_create_provider_for_box_version() {
-  echo "creating provider $_PROVIDER_NAME for version $_VERSION"
-
-}
-
-_get_version_upload_url() {
+  echo "creating box $_BOX_NAME for user $_USERNAME"
   local _RESPONSE
+
+  echo "fetching $_VERSION upload URL"
   _RESPONSE=$(_safely_run curl \
     --header "Content-Type: application/json" \
     --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-    https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions \
-    --data '{ "version": { "version": "'"$_VERSION"'" } }')
+    "https://app.vagrantup.com/api/v1/boxes" \
+    --data '{ "box": { "username": "'"$_USERNAME"'", "name": "'"$_BOX_NAME"'" } }')
+
+  echo "$_RESPONSE" | _assert_request_success
+}
+
+_create_box_version_url() {
+  local _RESPONSE
+
+  echo "creating url for version $1"
+  _RESPONSE=$(
+    _safely_run curl \
+      --header "Content-Type: application/json" \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions" \
+      --data '{ "version": { "version": "'"$1"'" } }'
+  )
+
+  echo "$_RESPONSE" | _assert_request_success
+}
+
+_create_provider_for_box_version() {
+  local _RESPONSE
+
+  echo "creating provider $_PROVIDER_NAME for version $_VERSION"
+  _RESPONSE=$(
+    _safely_run curl \
+      --header "Content-Type: application/json" \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/providers" \
+      --data '{ "provider": { "name": "'"$_PROVIDER_NAME"'" } }'
+  )
+
+  echo "$_RESPONSE" | _assert_request_success
+}
+
+_fetch_version_upload_url() {
+  local _RESPONSE
+
+  echo "fetching $_VERSION upload URL"
+  _RESPONSE=$(
+    _safely_run curl \
+      --header "Content-Type: application/json" \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions" \
+      --data '{ "version": { "version": "'"$_VERSION"'" } }'
+  )
 
   _UPLOAD_URL=$(echo "$_RESPONSE" | _assert_request_success | _get_json_field "upload_path")
 }
@@ -243,7 +281,7 @@ _main() {
         ;;
     esac
     _create_provider_for_box_version
-    _get_version_upload_url
+    _fetch_version_upload_url
     _release_box_version
   fi
 }
