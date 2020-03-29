@@ -151,6 +151,10 @@ _safely_run() {
   fi
 }
 
+_box_file() {
+  echo "${_BOX_NAME}_${_VERSION}.box"
+}
+
 _repackage_box() {
   _safely_run vagrant box repackage "${_BOX_NAME}_${_VERSION}" "$_PROVIDER_NAME" "$_VERSION"
 
@@ -189,13 +193,13 @@ _create_box_url() {
 _create_box_version_url() {
   local _RESPONSE
 
-  echo "creating url for version $1"
+  echo "creating URL for version $_VERSION"
   _RESPONSE=$(
     _safely_run curl \
       --header "Content-Type: application/json" \
       --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
       "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions" \
-      --data '{ "version": { "version": "'"$1"'" } }'
+      --data '{ "version": { "version": "'"$_VERSION"'" } }'
   )
 
   _assert_request_success "$_RESPONSE"
@@ -213,37 +217,56 @@ _create_provider_for_box_version() {
       --data '{ "provider": { "name": "'"$_PROVIDER_NAME"'" } }'
   )
 
+  echo $_RESPONSE
+
   _assert_request_success "$_RESPONSE"
 }
 
 _fetch_version_upload_url() {
   local _RESPONSE
 
-  echo "fetching $_VERSION upload URL"
+  echo "fetching version $_VERSION upload URL"
   _RESPONSE=$(
     _safely_run curl \
       --header "Content-Type: application/json" \
       --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/versions" \
+      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/provider/$_PROVIDER_NAME/upload" \
       --data '{ "version": { "version": "'"$_VERSION"'" } }'
   )
 
-  echo "$_RESPONSE" | _assert_request_success
+  _assert_request_success "$_RESPONSE"
 
   _UPLOAD_URL=$(echo "$_RESPONSE" | jq ."upload_path")
 }
 
-_release_box_version() {
-  local _HOSTED_TOCKEN
-  _HOSTED_TOCKEN=$(_safely_run curl -X PUT --upload-file "$_BOX_NAME".box "$_UPLOAD_URL")
-  _PREVIOUSLY_RETRIEVED_TOKEN=$(echo "$_UPLOAD_URL" | sed -E 's/.*\/(.*)"/\1/')
-  echo $"$_HOSTED_TOCKEN"
-  echo $"$_PREVIOUSLY_RETRIEVED_TOKEN"
+_upload_box() {
+  local _RESPONSE
 
-  if [ "$DRY_RUN" == "false" ] && [ "$_HOSTED_TOCKEN" == "$_PREVIOUSLY_RETRIEVED_TOKEN" ]; then
-    echo "FATAL: Could not get the version upload link for some reason. Try uploadining online"
-    exit 1
-  fi
+  echo "fetching version $_VERSION upload URL"
+  _RESPONSE=$(
+    _safely_run curl \
+      "$_UPLOAD_URL" \
+      --request PUT \
+      --upload-file "dry_run.box"
+  )
+
+  _assert_request_success "$_RESPONSE"
+
+}
+
+_release_version() {
+  local _RESPONSE
+
+  echo "fetching version $_VERSION upload URL"
+  _RESPONSE=$(
+    _safely_run curl \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/box/$_USERNAME/$_BOX_NAME/version/$_VERSION/release" \
+      --request PUT
+  )
+
+  _assert_request_success "$_RESPONSE"
+
 }
 
 ###############################################################################
@@ -255,43 +278,39 @@ _main() {
     _print_help
   else
 
-    _create_box_version_url "1.0.0"
-    # _create_provider_for_box_version
-    # _fetch_version_upload_url
-    # _release_box_version
+    case $1 in
+      create)
+        shift
+        # _package_box
+        _create_box_url
+        _read_create_args "$@"
+        _VERSION=1.0.0
+        _create_box_version_url
+        ;;
+      upgrage)
+        shift
+        _repackage_box
+        _get_current_version
+        _read_upgrade_args "$@"
+        _create_box_version_url
+        ;;
+      revert)
+        shift
+        _read_revert_args "$@"
+        _revert_box_version "$_VERSION"
+        exit 0
+        ;;
+      *)
+        echo "Unknown command recieved"
+        _print_help
+        exit 1
+        ;;
+    esac
+    _create_provider_for_box_version
+    _fetch_version_upload_url
+    _upload_box
+    _release_version
   fi
-  # else
-  #   case $1 in
-  #     create)
-  #       shift
-  #       _package_box
-  #       _create_box_url
-  #       _read_create_args "$@"
-  #       _create_box_version_url "1.0.0"
-  #       ;;
-  #     upgrage)
-  #       shift
-  #       _repackage_box
-  #       _get_current_version
-  #       _read_upgrade_args "$@"
-  #       _create_box_version_url "$_VERSION"
-  #       ;;
-  #     revert)
-  #       shift
-  #       _read_revert_args "$@"
-  #       _revert_box_version "$_VERSION"
-  #       exit 0
-  #       ;;
-  #     *)
-  #       echo "Unknown command recieved"
-  #       _print_help
-  #       exit 1
-  #       ;;
-  #   esac
-  #   _create_provider_for_box_version
-  #   _fetch_version_upload_url
-  #   _release_box_version
-  # fi
 }
 
 _main "$@"
