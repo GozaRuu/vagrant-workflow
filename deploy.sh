@@ -38,8 +38,8 @@ Usage:
   ${_ME} -h | --help
 Commands:
   ${_ME} create
-  ${_ME} upgrade [[--major | -ma] || [--minor -mi] || [--patch -p]]
-  ${_ME} revert [[--latest | -l][--version <semver>|| -v <semver>]]
+  ${_ME} upgrade [[--major/-ma] || [--minor/-mi] || [--patch/-p]]
+  ${_ME} revert [[--latest/-l][--version/-v <semver>]]
 Options:
   -h --help  Show this screen.
 HEREDOC
