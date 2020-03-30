@@ -34,8 +34,12 @@ _print_help() {
 
 Repackage and deploy the $_BOX_NAME/$_USERNAME Vagrant box to Vagrant Cloud
 Usage:
-  ${_ME} [<arguments>]
+  ${_ME} command [options]
   ${_ME} -h | --help
+Commands:
+  ${_ME} create
+  ${_ME} upgrade [[--major | -ma] || [--minor -mi] || [--patch -p]]
+  ${_ME} revert [[--latest | -l][--version <semver>|| -v <semver>]]
 Options:
   -h --help  Show this screen.
 HEREDOC
