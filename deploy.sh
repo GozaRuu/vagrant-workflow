@@ -57,8 +57,6 @@ _read_create_args() {
         ;;
     esac
   done
-
-  _VERSION="1.0.0"
 }
 
 _read_upgrade_args() {
@@ -87,7 +85,7 @@ _read_upgrade_args() {
   done
 
   if [ "$_VERSION" == "" ] || [ "$_CURRENT_VERSION" == "$_VERSION" ]; then
-    echo "no version section was specified"
+    echo "could not bump version"
     _print_help
     exit 1
   fi
@@ -303,7 +301,7 @@ _main() {
       *)
         echo "Unknown command recieved"
         _print_help
-        exit 1
+        exit 99
         ;;
     esac
     _create_provider_for_box_version
