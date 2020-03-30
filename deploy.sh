@@ -47,8 +47,8 @@ HEREDOC
 
 _read_create_args() {
   while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
+    _KEY="$1"
+    case $_KEY in
       *)
         echo "Unknown argument recieved"
         _print_help
@@ -61,8 +61,8 @@ _read_create_args() {
 
 _read_upgrade_args() {
   while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
+    _KEY="$1"
+    case $_KEY in
       -ma | --major)
         _VERSION=$(echo "$_CURRENT_VERSION" | awk -F. '{$1++;print}' | sed -E 's/ /./g')
         shift
@@ -93,8 +93,8 @@ _read_upgrade_args() {
 
 _read_revert_args() {
   while [[ $# -gt 0 ]]; do
-    key="$1"
-    case $key in
+    _KEY="$1"
+    case $_KEY in
       -l | --latest)
         _VERSION=$_CURRENT_VERSION
         shift
@@ -127,10 +127,12 @@ _read_revert_args() {
 _assert_request_success() {
   local _SUCCESS
   local _ERROR
+  local _REQUEST_NAME
   _SUCCESS=$(echo "$1" | jq ."success")
+  _REQUEST_NAME=$(echo "$2" | awk -F_ '{for (i=1; i<=NF; ++i) { $i=toupper(substr($i,1,1)) tolower(substr($i,2)); } print }')
   if [ "$_SUCCESS" == "false" ]; then
     _ERROR=$(echo "$1" | jq ."errors")
-    echo "FATAL: request failed. Errors:$_ERROR"
+    echo "FATAL:$_REQUEST_NAME failed. Errors:$_ERROR"
     exit 42
   fi
 }
@@ -140,7 +142,7 @@ _get_current_version() {
 }
 
 _safely_run() {
-  _COMMAND=""
+  local _COMMAND=""
   if [[ "$DRY_RUN" != "false" ]]; then
     printf -v _COMMAND "%q " "$@"
     echo "DRYRUN: Not executing $_COMMAND" >&2
@@ -173,10 +175,9 @@ _package_box() {
 }
 
 _create_box_url() {
-  echo "creating box $_BOX_NAME for user $_USERNAME"
   local _RESPONSE
 
-  echo "fetching $_VERSION upload URL"
+  echo "creating box: $_BOX_NAME in Vagrant Cloud"
   _RESPONSE=$(
     _safely_run curl \
       --header "Content-Type: application/json" \
@@ -185,13 +186,13 @@ _create_box_url() {
       --data '{ "box": { "username": "'"$_USERNAME"'", "name": "'"$_BOX_NAME"'" } }'
   )
 
-  _assert_request_success "$_RESPONSE"
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
 }
 
 _create_box_version_url() {
   local _RESPONSE
 
-  echo "creating URL for version $_VERSION"
+  echo "creating version url for $_VERSION"
   _RESPONSE=$(
     _safely_run curl \
       --header "Content-Type: application/json" \
@@ -200,7 +201,7 @@ _create_box_version_url() {
       --data '{ "version": { "version": "'"$_VERSION"'" } }'
   )
 
-  _assert_request_success "$_RESPONSE"
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
 }
 
 _create_provider_for_box_version() {
@@ -215,9 +216,7 @@ _create_provider_for_box_version() {
       --data '{ "provider": { "name": "'"$_PROVIDER_NAME"'" } }'
   )
 
-  echo $_RESPONSE
-
-  _assert_request_success "$_RESPONSE"
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
 }
 
 _fetch_version_upload_url() {
@@ -232,8 +231,7 @@ _fetch_version_upload_url() {
       --data '{ "version": { "version": "'"$_VERSION"'" } }'
   )
 
-  _assert_request_success "$_RESPONSE"
-
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
   _UPLOAD_URL=$(echo "$_RESPONSE" | jq ."upload_path")
 }
 
@@ -248,8 +246,7 @@ _upload_box() {
       --upload-file "dry_run.box"
   )
 
-  _assert_request_success "$_RESPONSE"
-
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
 }
 
 _release_version() {
@@ -263,8 +260,7 @@ _release_version() {
       --request PUT
   )
 
-  _assert_request_success "$_RESPONSE"
-
+  _assert_request_success "$_RESPONSE" "${FUNCNAME[0]}"
 }
 
 ###############################################################################
@@ -275,25 +271,24 @@ _main() {
   if [[ "${1:-}" =~ ^-h|--help$ ]]; then
     _print_help
   else
-
-    case $1 in
+    : "${1:?"FATAL: command is not set $(echo -e "\n$(_print_help)")"}"
+    _CMD="$1"
+    shift
+    case "$_CMD" in
       create)
-        shift
-        # _package_box
-        _create_box_url
         _read_create_args "$@"
+        # _package_box
+        # _create_box_url
         _VERSION=1.0.0
-        _create_box_version_url
+        # _create_box_version_url
         ;;
       upgrage)
-        shift
+        _read_upgrade_args "$@"
         _repackage_box
         _get_current_version
-        _read_upgrade_args "$@"
         _create_box_version_url
         ;;
       revert)
-        shift
         _read_revert_args "$@"
         _revert_box_version "$_VERSION"
         exit 0
